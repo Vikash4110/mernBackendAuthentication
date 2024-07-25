@@ -6,19 +6,22 @@ const path = require("path");
 const hbs = require("hbs");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const cookieParser = require('cookie-parser');
 require("./db/conn");
 const Register = require("./models/registers");
+const auth = require("./middleware/auth")
 
 const templatePath = path.join(__dirname, "../templates/views");
 const partialsPath = path.join(__dirname, "../templates/partials");
 
-console.log("SECRET_KEY:", process.env.SECRET_KEY);
+// console.log("SECRET_KEY:", process.env.SECRET_KEY);
 
 // app.use(express.static(staticPath));          
 app.set("view engine", "hbs");
 app.set("views", templatePath);
 hbs.registerPartials(partialsPath);
 app.use(express.json());
+app.use(cookieParser()); 
 app.use(express.urlencoded({ extended: false }));
 
 app.get("/", (req, res) => {
@@ -50,6 +53,15 @@ app.post("/register", async (req, res) => {
       const token = await registerEmployee.generateAuthToken();
       console.log(`the login token is ${token}`);
 
+      // The res.cookie() function is used to set the cookie name to value.
+      // the value parameter may be a string or object converted to json
+
+      res.cookie("jwt", token, {
+        expires: new Date(Date.now() + 30000), // Adjust expiration time as needed
+        httpOnly: true,
+      });
+
+
       // Password Hash
       // middleware
       const registered = await registerEmployee.save();
@@ -66,6 +78,13 @@ app.get("/login", (req, res) => {
   res.render("login");
 });
 
+app.get("/secret", auth ,  (req, res) => {
+  console.log(`This is the cookie: ${req.cookies.jwt}`);
+  res.render("secret");
+});
+ 
+
+
 // Login Validation
 app.post("/login", async (req, res) => {
   try {
@@ -78,7 +97,12 @@ app.post("/login", async (req, res) => {
     const ispassMatch = await bcrypt.compare(password, userEmail.password);
     // jwt
     const token = await userEmail.generateAuthToken();
-    console.log(token);
+    console.log(`The token is : ${token}`);
+
+    res.cookie("jwt", token, {
+      expires: new Date(Date.now() + 100000), // Adjust expiration time as needed
+      httpOnly: true,
+    });
 
     if (ispassMatch) {
       res.status(201).render("index");
@@ -89,6 +113,39 @@ app.post("/login", async (req, res) => {
     res.status(400).send("Invalid Login Details");
   }
 });
+
+app.get("/logout", auth, async (req, res) => {
+  try {
+    if (!req.user) {
+      throw new Error('User not authenticated');
+    }
+
+    console.log(req.user);
+
+    // Single device logout
+    // Uncomment the following lines for single device logout
+    /*
+    req.user.tokens = req.user.tokens.filter((tokenObj) => {
+      return tokenObj.token !== req.token;
+    });
+    */
+
+    // All device logout
+    req.user.tokens = [];  // Clear all tokens
+
+    res.clearCookie("jwt");
+    console.log(`Logout Successfully`);
+
+    await req.user.save();  // Save the updated user document
+
+    res.render("login");
+  } catch (error) {
+    console.error(error);
+    res.status(500).send(error.message || error);
+  }
+});
+
+
 
 // Encryption (Two Way Communication)
 // origData --> Encode --> Decode
