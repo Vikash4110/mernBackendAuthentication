@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require("express");
 const app = express();
-const Port = process.env.PORT || 3000;
+const port = process.env.PORT || 3000;
 const path = require("path");
 const hbs = require("hbs");
 const bcrypt = require("bcryptjs");
@@ -9,34 +9,36 @@ const jwt = require("jsonwebtoken");
 const cookieParser = require('cookie-parser');
 require("./db/conn");
 const Register = require("./models/registers");
-const auth = require("./middleware/auth")
+const auth = require("./middleware/auth");
+const upload = require('./middleware/upload');
 
+// Paths for views and partials
 const templatePath = path.join(__dirname, "../templates/views");
 const partialsPath = path.join(__dirname, "../templates/partials");
 
-// console.log("SECRET_KEY:", process.env.SECRET_KEY);
-
-// app.use(express.static(staticPath));          
+// Middleware setup
 app.set("view engine", "hbs");
 app.set("views", templatePath);
 hbs.registerPartials(partialsPath);
 app.use(express.json());
-app.use(cookieParser()); 
+app.use(cookieParser());
 app.use(express.urlencoded({ extended: false }));
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+// Routes
 app.get("/", (req, res) => {
   res.render("index");
 });
-// create a new user in our database
 
 app.get("/register", (req, res) => {
   res.render("register");
 });
 
-app.post("/register", async (req, res) => {
+app.post("/register", upload.single('profilePicture'), async (req, res) => {
   try {
     const password = req.body.password;
     const cpassword = req.body.confirmpassword;
+
     if (password === cpassword) {
       const registerEmployee = new Register({
         firstname: req.body.firstname,
@@ -47,23 +49,20 @@ app.post("/register", async (req, res) => {
         age: req.body.age,
         password: password,
         confirmpassword: cpassword,
+        profilePicture: req.file ? req.file.filename : 'default.png',
       });
 
-      // jwt
+      // Generate JWT token
       const token = await registerEmployee.generateAuthToken();
-      console.log(`the login token is ${token}`);
+      console.log(`The login token is ${token}`);
 
-      // The res.cookie() function is used to set the cookie name to value.
-      // the value parameter may be a string or object converted to json
-
+      // Set cookie
       res.cookie("jwt", token, {
         expires: new Date(Date.now() + 30000), // Adjust expiration time as needed
         httpOnly: true,
       });
 
-
-      // Password Hash
-      // middleware
+      // Save registered employee
       const registered = await registerEmployee.save();
       res.status(201).render("index");
     } else {
@@ -78,40 +77,54 @@ app.get("/login", (req, res) => {
   res.render("login");
 });
 
-app.get("/secret", auth ,  (req, res) => {
-  console.log(`This is the cookie: ${req.cookies.jwt}`);
-  res.render("secret");
-});
- 
-
-
-// Login Validation
 app.post("/login", async (req, res) => {
   try {
     const email = req.body.email;
     const password = req.body.password;
 
     const userEmail = await Register.findOne({ email: email });
-    // console.log(`Email is ${email} and password is ${password}`);
 
-    const ispassMatch = await bcrypt.compare(password, userEmail.password);
-    // jwt
-    const token = await userEmail.generateAuthToken();
-    console.log(`The token is : ${token}`);
+    if (userEmail) {
+      const isPassMatch = await bcrypt.compare(password, userEmail.password);
+      
+      if (isPassMatch) {
+        // Generate JWT token
+        const token = await userEmail.generateAuthToken();
+        console.log(`The token is : ${token}`);
 
-    res.cookie("jwt", token, {
-      expires: new Date(Date.now() + 100000), // Adjust expiration time as needed
-      httpOnly: true,
-    });
+        // Set cookie
+        res.cookie("jwt", token, {
+          expires: new Date(Date.now() + 100000), // Adjust expiration time as needed
+          httpOnly: true,
+        });
 
-    if (ispassMatch) {
-      res.status(201).render("index");
+        res.status(201).render("index");
+      } else {
+        res.send("Invalid Password Entered");
+      }
     } else {
-      res.send("Invalid Password Entered");
+      res.send("Invalid Login Details");
     }
   } catch (err) {
     res.status(400).send("Invalid Login Details");
   }
+});
+
+app.get("/secret", auth, (req, res) => {
+  console.log(`This is the cookie: ${req.cookies.jwt}`);
+  res.render("secret");
+});
+
+app.get("/dashboard", auth, (req, res) => {
+  res.render("dashboard", {
+    firstname: req.user.firstname,
+    lastname: req.user.lastname,
+    email: req.user.email,
+    gender: req.user.gender,
+    phone: req.user.phone,
+    age: req.user.age,
+    profilePicture: req.user.profilePicture || "default.png"
+  });
 });
 
 app.get("/logout", auth, async (req, res) => {
@@ -121,14 +134,6 @@ app.get("/logout", auth, async (req, res) => {
     }
 
     console.log(req.user);
-
-    // Single device logout
-    // Uncomment the following lines for single device logout
-    /*
-    req.user.tokens = req.user.tokens.filter((tokenObj) => {
-      return tokenObj.token !== req.token;
-    });
-    */
 
     // All device logout
     req.user.tokens = [];  // Clear all tokens
@@ -145,36 +150,6 @@ app.get("/logout", auth, async (req, res) => {
   }
 });
 
-
-
-// Encryption (Two Way Communication)
-// origData --> Encode --> Decode
-// vikash --> hsavik --> vikash
-
-// Hashing (One Way Communication)
-// vikash --> sgwgwgfsd.sf.sfweffw.
-// Best Hashing algo --> Bcryptjs
-
-// const securePassword = async (password) => {
-//     const passwordHash = await bcrypt.hash(password, 12);
-//     console.log(passwordHash);
-
-//     const passwordMatch = await bcrypt.compare("rahil", passwordHash);
-//     console.log(passwordMatch);
-// }
-// securePassword("vikash@123");
-
-// JWT
-// const createToken = async () => {
-//     const token = await jwt.sign({_id : "66a28765eaf066a285db5801"}, "vikashbahralisverygoodboyandverysmart" , {
-//         expiresIn : "2 seconds"
-//     });
-//     console.log(token);
-
-//     const userVer = await jwt.verify(token , "vikashbahralisverygoodboyandverysmart" );
-//     console.log(userVer);
-// }
-// createToken();
-app.listen(Port, () => {
-  console.log(`Listening to Port number : ${Port}`);
+app.listen(port, () => {
+  console.log(`Listening to port number: ${port}`);
 });
